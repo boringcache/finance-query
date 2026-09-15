@@ -12,4 +12,4 @@ command = [
 ]
 mount-cache = true
 fail-on-cache-error = true
-metadata-hints = ["tool=buildkit", "workload=server-and-mcp"]
+metadata-hints = ["tool=oci", "workload=server-and-mcp"]
