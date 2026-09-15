@@ -4,7 +4,7 @@ workspace = "boringcache/finance-query"
 metadata-hints = ["project=finance-query", "experiment=issue-494", "workload=server"]
 
 [adapters.docker]
-tag = "finance-query-docker-whole-v2"
+tag = "finance-query-docker-whole-v3"
 command = [
   "docker", "buildx", "build",
   "--file", "../../../../source/server/Dockerfile",
