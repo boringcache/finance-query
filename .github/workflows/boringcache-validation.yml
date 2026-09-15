@@ -77,7 +77,7 @@ jobs:
           docker run -d --name test-server -p 8000:8000 financequery:v2-ci
           docker run -d --name test-mcp -p 3000:3000 -e MCP_TRANSPORT=http financequery:mcp-ci
           sleep 10
-          docker exec test-server curl -f http://localhost:8000/v2/health || true
+          docker exec test-server curl -f http://localhost:8000/v2/health
           curl -f http://localhost:3000/health
           docker stop test-server test-mcp
           docker rm test-server test-mcp
@@ -135,7 +135,7 @@ jobs:
           docker run -d --name test-server -p 8000:8000 financequery:v2-ci
           docker run -d --name test-mcp -p 3000:3000 -e MCP_TRANSPORT=http financequery:mcp-ci
           sleep 10
-          docker exec test-server curl -f http://localhost:8000/v2/health || true
+          docker exec test-server curl -f http://localhost:8000/v2/health
           curl -f http://localhost:3000/health
           docker stop test-server test-mcp
           docker rm test-server test-mcp
@@ -192,7 +192,7 @@ jobs:
           docker run -d --name test-server -p 8000:8000 financequery:v2-ci
           docker run -d --name test-mcp -p 3000:3000 -e MCP_TRANSPORT=http financequery:mcp-ci
           sleep 10
-          docker exec test-server curl -f http://localhost:8000/v2/health || true
+          docker exec test-server curl -f http://localhost:8000/v2/health
           curl -f http://localhost:3000/health
           docker stop test-server test-mcp
           docker rm test-server test-mcp
@@ -259,7 +259,7 @@ jobs:
           docker run -d --name test-server -p 8000:8000 financequery:v2-ci
           docker run -d --name test-mcp -p 3000:3000 -e MCP_TRANSPORT=http financequery:mcp-ci
           sleep 10
-          docker exec test-server curl -f http://localhost:8000/v2/health || true
+          docker exec test-server curl -f http://localhost:8000/v2/health
           curl -f http://localhost:3000/health
           docker stop test-server test-mcp
           docker rm test-server test-mcp
