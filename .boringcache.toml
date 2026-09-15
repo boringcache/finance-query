@@ -1,0 +1,15 @@
+workspace = "boringcache/finance-query"
+
+[proxy]
+metadata-hints = ["project=finance-query", "experiment=issue-494"]
+
+[adapters.docker]
+tag = "finance-query-docker"
+command = [
+  "docker", "buildx", "bake",
+  "--file", ".github/boringcache-validation-bake.hcl",
+  "boringcache",
+]
+mount-cache = true
+fail-on-cache-error = true
+metadata-hints = ["tool=buildkit", "workload=server-and-mcp"]

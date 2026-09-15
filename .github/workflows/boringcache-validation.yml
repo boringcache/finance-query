@@ -1,0 +1,274 @@
+name: BoringCache validation — finance-query Docker cache
+run-name: Finance-query issue 494 — ${{ inputs.providers }} — ${{ inputs.source_ref }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Exact upstream commit to build
+        required: true
+        type: string
+      providers:
+        description: Cache providers to compare
+        type: choice
+        options:
+          - all
+          - boringcache
+          - github
+        default: all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: finance-query-cache-validation-${{ inputs.source_ref }}
+  cancel-in-progress: false
+
+jobs:
+  github-publish:
+    name: GitHub cache — publish server and MCP images
+    if: github.repository == 'boringcache/finance-query' && github.ref == 'refs/heads/boringcache-validation' && (inputs.providers == 'all' || inputs.providers == 'github')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout the validation plan
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: boringcache-validation
+          path: .boringcache-plan
+          persist-credentials: false
+
+      - name: Checkout the upstream source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Verdenroz/finance-query
+          ref: ${{ inputs.source_ref }}
+          path: source
+          persist-credentials: false
+
+      - name: Record the source revision
+        working-directory: source
+        env:
+          EXPECTED_SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          [[ "$EXPECTED_SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_REF"
+          git rev-parse HEAD
+          cp ../.boringcache-plan/.github/boringcache-validation-bake.hcl .github/boringcache-validation-bake.hcl
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build both images with the existing GitHub cache scopes
+        uses: docker/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f # v7.4.0
+        with:
+          source: source
+          files: .github/boringcache-validation-bake.hcl
+          targets: gha-publish
+
+      - name: Test both images
+        run: |
+          docker run -d --name test-server -p 8000:8000 financequery:v2-ci
+          docker run -d --name test-mcp -p 3000:3000 -e MCP_TRANSPORT=http financequery:mcp-ci
+          sleep 10
+          docker exec test-server curl -f http://localhost:8000/v2/health || true
+          curl -f http://localhost:3000/health
+          docker stop test-server test-mcp
+          docker rm test-server test-mcp
+
+  github-restore:
+    name: GitHub cache — restore server and MCP images on a clean runner
+    needs: github-publish
+    if: github.repository == 'boringcache/finance-query' && github.ref == 'refs/heads/boringcache-validation' && (inputs.providers == 'all' || inputs.providers == 'github')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout the validation plan
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: boringcache-validation
+          path: .boringcache-plan
+          persist-credentials: false
+
+      - name: Checkout the upstream source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Verdenroz/finance-query
+          ref: ${{ inputs.source_ref }}
+          path: source
+          persist-credentials: false
+
+      - name: Record the source revision
+        working-directory: source
+        env:
+          EXPECTED_SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          [[ "$EXPECTED_SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_REF"
+          git rev-parse HEAD
+          cp ../.boringcache-plan/.github/boringcache-validation-bake.hcl .github/boringcache-validation-bake.hcl
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build both images from the existing GitHub cache scopes
+        uses: docker/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f # v7.4.0
+        with:
+          source: source
+          files: .github/boringcache-validation-bake.hcl
+          targets: gha-restore
+
+      - name: Test both images
+        run: |
+          docker run -d --name test-server -p 8000:8000 financequery:v2-ci
+          docker run -d --name test-mcp -p 3000:3000 -e MCP_TRANSPORT=http financequery:mcp-ci
+          sleep 10
+          docker exec test-server curl -f http://localhost:8000/v2/health || true
+          curl -f http://localhost:3000/health
+          docker stop test-server test-mcp
+          docker rm test-server test-mcp
+
+  boringcache-publish:
+    name: BoringCache — publish shared layers and cache mounts
+    if: github.repository == 'boringcache/finance-query' && github.ref == 'refs/heads/boringcache-validation' && (inputs.providers == 'all' || inputs.providers == 'boringcache')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout the validation plan
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: boringcache-validation
+          path: .boringcache-plan
+          persist-credentials: false
+
+      - name: Checkout the upstream source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Verdenroz/finance-query
+          ref: ${{ inputs.source_ref }}
+          path: source
+          persist-credentials: false
+
+      - name: Prepare the exact source revision for BoringCache
+        env:
+          EXPECTED_SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          [[ "$EXPECTED_SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C source rev-parse HEAD)" = "$EXPECTED_SOURCE_REF"
+          cp .boringcache-plan/.boringcache.toml source/.boringcache.toml
+          cp .boringcache-plan/.github/boringcache-validation-bake.hcl source/.github/boringcache-validation-bake.hcl
+
+      - name: Build both images and publish shared cache state
+        id: boringcache
+        uses: boringcache/one@1039999c65011be670f5655e0e48ad556188ab12 # v1.30.4
+        with:
+          working-directory: source
+          trust-policy: publish
+          mode: docker
+          diagnostics: summary
+          fail-on-cache-error: true
+
+      - name: Test both images
+        run: |
+          docker run -d --name test-server -p 8000:8000 financequery:v2-ci
+          docker run -d --name test-mcp -p 3000:3000 -e MCP_TRANSPORT=http financequery:mcp-ci
+          sleep 10
+          docker exec test-server curl -f http://localhost:8000/v2/health || true
+          curl -f http://localhost:3000/health
+          docker stop test-server test-mcp
+          docker rm test-server test-mcp
+
+      - name: Retain BoringCache evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: finance-query-boringcache-publish-${{ inputs.source_ref }}
+          path: ${{ steps.boringcache.outputs.evidence-path }}
+          if-no-files-found: error
+          retention-days: 30
+
+  boringcache-restore:
+    name: BoringCache — restore shared layers and cache mounts on a clean runner
+    needs: boringcache-publish
+    if: github.repository == 'boringcache/finance-query' && github.ref == 'refs/heads/boringcache-validation' && (inputs.providers == 'all' || inputs.providers == 'boringcache')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout the validation plan
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: boringcache-validation
+          path: .boringcache-plan
+          persist-credentials: false
+
+      - name: Checkout the upstream source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Verdenroz/finance-query
+          ref: ${{ inputs.source_ref }}
+          path: source
+          persist-credentials: false
+
+      - name: Prepare the exact source revision for BoringCache
+        env:
+          EXPECTED_SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          [[ "$EXPECTED_SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C source rev-parse HEAD)" = "$EXPECTED_SOURCE_REF"
+          cp .boringcache-plan/.boringcache.toml source/.boringcache.toml
+          cp .boringcache-plan/.github/boringcache-validation-bake.hcl source/.github/boringcache-validation-bake.hcl
+
+      - name: Build both images from shared cache state
+        id: boringcache
+        uses: boringcache/one@1039999c65011be670f5655e0e48ad556188ab12 # v1.30.4
+        with:
+          working-directory: source
+          trust-policy: restore
+          mode: docker
+          diagnostics: summary
+          fail-on-cache-error: true
+
+      - name: Test both images
+        run: |
+          docker run -d --name test-server -p 8000:8000 financequery:v2-ci
+          docker run -d --name test-mcp -p 3000:3000 -e MCP_TRANSPORT=http financequery:mcp-ci
+          sleep 10
+          docker exec test-server curl -f http://localhost:8000/v2/health || true
+          curl -f http://localhost:3000/health
+          docker stop test-server test-mcp
+          docker rm test-server test-mcp
+
+      - name: Retain BoringCache evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: finance-query-boringcache-restore-${{ inputs.source_ref }}
+          path: ${{ steps.boringcache.outputs.evidence-path }}
+          if-no-files-found: error
+          retention-days: 30
