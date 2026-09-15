@@ -1,0 +1,18 @@
+workspace = "boringcache/finance-query"
+
+[proxy]
+metadata-hints = ["project=finance-query", "experiment=issue-494", "workload=server"]
+
+[adapters.docker]
+tag = "finance-query-docker-whole-v2"
+command = [
+  "docker", "buildx", "build",
+  "--file", "../../../../source/server/Dockerfile",
+  "--build-arg", "CARGO_FEATURES=translation",
+  "--load",
+  "--tag", "financequery:v2-ci",
+  "../../../../source",
+]
+mount-cache = true
+fail-on-cache-error = true
+metadata-hints = ["tool=oci", "workload=server"]
