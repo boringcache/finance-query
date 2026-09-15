@@ -15,17 +15,24 @@ BoringCache tag. That tag is also the OCI layer-cache manifest address. Each
 independent publisher can therefore replace the layer graph restored by the
 other job.
 
-The shared Cargo mounts materially reduced compilation on source and lockfile
-changes. They did not retain both image graphs. A later unchanged-source run
-made three jobs complete in about one minute while the BoringCache server had
-to rebuild after the MCP job had published last. This is a current product
-limitation, not a successful prospect proof.
+The shared Cargo mounts materially reduced compilation on the fresh lockfile
+transition, but they saved only 42 seconds of total runner time because the
+fat-LTO links dominated. They did not retain both image graphs. On the next
+unchanged-Docker-input run, three jobs completed in about one minute while the
+BoringCache MCP job took 14m35s after the server had published last. This is a
+current product limitation, not a successful prospect proof.
 
 Separate server and MCP BoringCache tags would retain both image graphs, but
 would also give them separate Cargo mount archives and would not test the
 cross-job reuse requested in the issue. The released CLI and repository plan
 schema expose `tag` and the boolean `mount-cache`; they do not expose a separate
 mount-cache namespace or tag.
+
+The shared target archive also followed last-writer state rather than merging
+the two independent target directories. After the server published last, MCP
+restored the archive but still compiled 81 MCP-specific crates on an unchanged
+Docker input. Separate OCI tags alone would therefore not supply the cross-job
+target reuse tested here.
 
 ## Workflow under test
 
@@ -57,18 +64,16 @@ The server health probe deliberately retains upstream's `|| true`; the MCP
 health probe is gating. This branch does not change unrelated upstream test
 semantics.
 
-## Rolling-source cohort
+## Fresh rolling-source cohort
 
-The revisions ran oldest to newest, with one workflow completing before the
-next started so both providers received the same cache history.
+The primary `v3` cohort used new GitHub scopes and a new BoringCache tag. The
+revisions ran sequentially so both providers received the same cache history.
 
 | Order | Source revision | Change represented |
 | ---: | --- | --- |
-| 1 | `d7faa19b4363066e2ae10e5cac8356df2d6d9a7c` | Initial seed; generated-output update |
-| 2 | `6ea3108469eab9d8a8b66cc625063e52797a97e4` | Generated-output-only update |
-| 3 | `6250e615def5735a5ed1cb5cd2359afce4f3afeb` | Rust source changes with an unchanged lockfile |
-| 4 | `59c8c317260bdb3f9118ed5561b94c4f9b896a6e` | Rust source, manifest, and `Cargo.lock` changes |
-| 5 | `a9d680732f02eb94693676333602f6335010ddab` | `CHANGELOG.md`-only update after the lockfile change |
+| 1 | `6250e615def5735a5ed1cb5cd2359afce4f3afeb` | Cold seed at the parent state |
+| 2 | `59c8c317260bdb3f9118ed5561b94c4f9b896a6e` | Rust source, manifest, and `Cargo.lock` changes |
+| 3 | `a9d680732f02eb94693676333602f6335010ddab` | `CHANGELOG.md`-only update; Markdown is excluded from both Docker contexts |
 
 ## Complete-workflow results
 
@@ -79,37 +84,36 @@ supporting evidence, not a cache hit rate.
 
 | Revision | Provider | Server job / build | MCP job / build | Total runner | Critical path | Compile lines server / MCP | Result |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Seed | GitHub | 18m24s / 17m33s | 16m39s / 15m34s | 35m03s | 18m24s | 331 / 345 | Both complete |
-| Seed | BoringCache | 22m26s / 21m51s | 16m34s / 15m27s | 39m00s | 22m26s | 331 / 345 | Both complete |
-| Generated-only retry | GitHub | 1m25s / 16s | 1m11s / 10s | 2m36s | 1m25s | 0 / 0 | Both complete |
-| Generated-only retry | BoringCache | 1m07s / 24s | 13m42s / 12m44s | 14m49s | 13m42s | 0 / 8 | Both complete |
-| Source-only | GitHub | 22m00s / 21m09s | 16m36s / 15m30s | 38m36s | 22m00s | 294 / 307 | Both complete |
-| Source-only | BoringCache | 19m53s / 19m13s | 10m49s / 9m50s | 30m42s | 19m53s | 6 / 3 | Both complete |
-| Lockfile retry | GitHub | 1m02s / 10s | 15m52s / 14m53s | 16m54s | 15m52s | 0 / 311 | Both complete |
-| Lockfile retry | BoringCache | 50s / 14s | 13m07s / 12m17s | 13m57s | 13m07s | 0 / 8 | Both complete |
-| Post-lock unchanged | GitHub | Pending | Pending | Pending | Pending | Pending | Pending |
-| Post-lock unchanged | BoringCache | Pending | Pending | Pending | Pending | Pending | Pending |
+| Fresh cold seed | GitHub | 21m55s / 21m11s | 16m05s / 15m08s | 38m00s | 21m55s | 331 / 345 | Both complete |
+| Fresh cold seed | BoringCache | 22m33s / 21m51s | 15m35s / 14m42s | 38m08s | 22m33s | 331 / 345 | Both complete |
+| Fresh lock transition | GitHub | 20m54s / 20m06s | 15m16s / 14m22s | 36m10s | 20m54s | 297 / 311 | Both complete |
+| Fresh lock transition | BoringCache | 20m26s / 19m51s | 15m02s / 14m10s | 35m28s | 20m26s | 6 / 81 | Both complete |
+| Fresh post-lock unchanged | GitHub | 49s / 7s | 1m04s / 8s | 1m53s | 1m04s | 0 / 0 | Both complete |
+| Fresh post-lock unchanged | BoringCache | 55s / 15s | 14m35s / 13m39s | 15m30s | 14m35s | 0 / 81 | Both complete |
 
-The source-only run reduced BoringCache total runner time by 7m54s (20.5%) and
-critical path by 2m07s (9.6%) relative to the GitHub control. The complete
-lockfile retry reduced total runner time by 2m57s (17.5%) and critical path by
-2m45s (17.3%). The generated-only retry moved in the opposite direction:
-BoringCache used 12m13s more runner time and added 12m17s to the critical path.
-The shared tag contained the server graph, so MCP restored both Cargo mounts
-but rebuilt the four workspace crates under the fat-LTO release profile.
+The cold seeds differed by eight seconds of total runner time. On the fresh
+lock transition, BoringCache reduced 608 compile lines to 87 but saved only 42
+seconds of total runner time (1.9%) and 28 seconds of critical path (2.2%). On
+the following unchanged-Docker-input revision, BoringCache used 13m37s more
+runner time and added 13m31s to the critical path. The server publication had
+replaced the MCP graph and target snapshot, so MCP restored both mount archives
+but still compiled 81 crates and repeated its fat-LTO link.
+
+An earlier `v2` source-only comparison showed a larger changed-source saving,
+but later `v2` recovery runs had asymmetric history after infrastructure
+failures. The fresh `v3` sequence above is the decision dataset.
 
 ## Transfer and reuse evidence
 
-On the source-only run, the BoringCache server restored its target and registry
-mounts in 11.946s and 6.814s. MCP restored them in 18.422s and 7.658s. The
-BoringCache layer manifest imports took 0.3s and 0.1s, and each layer export
-reported 0.6s. The corresponding GitHub manifest imports took 0.4s and 0.5s;
-its layer exports took 12.1s and 13.7s. GitHub did not restore either Cargo
-mount because `type=gha` does not export their contents.
+On the fresh lock transition, the BoringCache server restored its target and
+registry mounts in 7.421s and 6.226s. MCP restored them in 7.818s and 5.546s.
+Each BoringCache layer-manifest import took 0.1s; its layer exports reported
+0.3s for server and 0.5s for MCP. GitHub did not restore either Cargo mount
+because `type=gha` does not export their contents.
 
-On the lockfile retry, the BoringCache server was a complete graph hit. MCP
-restored the shared target and registry mounts in 11.073s and 6.329s before
-compiling eight crates. The GitHub MCP control emitted 311 compile lines.
+On the fresh post-lock run, MCP restored the target and registry mounts in
+7.743s and 5.191s. The restore was a hit, but the server's last-published target
+snapshot lacked the MCP-specific outputs, and MCP emitted 81 compile lines.
 
 The logs also show that BoringCache publications reused remote content rather
 than uploading every owned body. Those counters are not equivalent to network
@@ -127,8 +131,9 @@ Two failed attempts are excluded from the timing table but remain relevant:
 - [run 35028408284](https://github.com/boringcache/finance-query/actions/runs/35028408284)
   lost the GitHub MCP control before its build when `setup-buildx` timed out
   pulling `moby/buildkit:buildx-stable-1` from Docker Hub. The other three jobs
-  completed. The complete four-job lockfile retry succeeded and supplies the
-  comparison above.
+  completed. A complete four-job retry succeeded, but its cache history was no
+  longer symmetric. It is recovery evidence only. The later fresh `v3` cohort
+  supplies the comparison above.
 
 Configured image tests, Trivy scans, and SARIF uploads completed on every job
 marked complete in the table. The server probe remains non-gating because that
@@ -136,11 +141,11 @@ is the upstream behavior.
 
 ## Run record
 
-- Seed: [35021208829](https://github.com/boringcache/finance-query/actions/runs/35021208829)
-- Generated-only successful retry: [35025020739](https://github.com/boringcache/finance-query/actions/runs/35025020739)
-- Source-only: [35026384383](https://github.com/boringcache/finance-query/actions/runs/35026384383)
-- Lockfile successful retry: [35030494868](https://github.com/boringcache/finance-query/actions/runs/35030494868)
-- Post-lock unchanged: [35031883018](https://github.com/boringcache/finance-query/actions/runs/35031883018)
+- Fresh seed: [35032676695](https://github.com/boringcache/finance-query/actions/runs/35032676695)
+- Fresh lock transition: [35034450000](https://github.com/boringcache/finance-query/actions/runs/35034450000)
+- Fresh post-lock unchanged: [35036054819](https://github.com/boringcache/finance-query/actions/runs/35036054819)
+- Earlier source-only exploratory run: [35026384383](https://github.com/boringcache/finance-query/actions/runs/35026384383)
+- Earlier post-lock collision in the opposite direction: [35031883018](https://github.com/boringcache/finance-query/actions/runs/35031883018)
 
 ## Decision boundary
 
