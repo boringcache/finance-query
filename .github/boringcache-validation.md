@@ -1,5 +1,11 @@
 # BoringCache validation for finance-query issue 494
 
+## Issue-bounded result
+
+| Upstream pain | Exact experiment | Measured result | Bounded verdict |
+| --- | --- | --- | --- |
+| [Issue #494](https://github.com/Verdenroz/finance-query/issues/494) reports that the independent server and MCP Docker jobs recompile overlapping Rust dependencies after lockfile or manifest changes because GitHub's BuildKit cache does not retain Cargo cache mounts. | Run both complete Docker jobs concurrently with their existing GitHub layer caches and with the official BoringCache Docker adapter. Compare a cold seed, a real lockfile transition, and an unchanged-Docker-input revision while retaining health checks, scans, and uploads. | On the lockfile transition, BoringCache reduced 608 compile lines to 87 but saved 42 seconds of total runner time and 28 seconds of critical path. On the next unchanged-input run, the BoringCache MCP job took 14m35s and added 13m31s to the critical path because the server publication had replaced the MCP image graph and target snapshot. | The released adapter does not solve issue #494's two-job topology. It needs independent OCI graph tags plus a separately shared, merge-safe Cargo mount namespace; the current single tag controls both states. |
+
 This branch runs the complete Docker portion of
 [Verdenroz/finance-query#494](https://github.com/Verdenroz/finance-query/issues/494).
 The issue reports that the independent server and MCP Docker jobs each rebuild
